@@ -53,7 +53,7 @@ with col1:
 
 with col2:
     st.title("INTRADAY to SWING CARRY SCANNER")
-    st.caption("Powered by "TARA SWINGLAB" Framework | Institutional Swing Grade")
+    st.caption("Powered by "TARA SWINGLAB Framework" | Institutional Swing Grade")
 
 st.divider()
 
@@ -89,9 +89,14 @@ def analyze_stock(ticker):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
-        # LIQUIDITY FILTER (10L Safety)
+        # PRE-FILTERS (Price & Liquidity)
         avg_vol = df['Volume'].iloc[-5:].mean()
         price = float(df['Close'].iloc[-1])
+        
+        # RULE 1: Price must be >= 20 (Ignore Penny Stocks)
+        if price < 20: return None
+        
+        # RULE 2: Turnover must be >= 10 Lakhs (Ignore Illiquid)
         if (avg_vol * price) < 1000000: return None
 
         # --- CALCULATIONS ---
