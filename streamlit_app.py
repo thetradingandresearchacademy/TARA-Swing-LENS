@@ -1,228 +1,224 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
 import requests
 import io
 import concurrent.futures
-import time
+import os
 
-# --- 1. CONFIGURATION ---
-st.set_page_config(layout="wide", page_title="TARA Institutional Scanner", page_icon="💎")
+# --- 1. CONFIGURATION & BRANDING ---
+st.set_page_config(layout="wide", page_title="TARA Swing Scanner", page_icon="💎")
 
+# Custom CSS for Premium "TARA Gold" UI
 st.markdown("""
     <style>
-    .stApp { background-color: #0e1117; color: #ffffff; }
-    h1, h2, h3 { color: #FFD700 !important; }
-    div[data-testid="stMetricValue"] { color: #00FFFF; font-weight: bold; }
-    .stDataFrame { border: 1px solid #444; }
-    .debug-box { font-family: monospace; font-size: 12px; color: #aaa; }
+    /* Dark Background & Gold Accents */
+    .stApp { background-color: #050505; color: #e0e0e0; }
+    
+    /* Headers */
+    h1, h2, h3 { color: #FFD700 !important; font-family: 'Helvetica Neue', sans-serif; }
+    
+    /* Metrics */
+    div[data-testid="stMetricValue"] { color: #00FFFF; font-size: 28px !important; }
+    div[data-testid="stMetricLabel"] { color: #aaaaaa; }
+    
+    /* Tables */
+    .stDataFrame { border-radius: 10px; border: 1px solid #333; }
+    
+    /* Buttons */
+    .stButton>button {
+        background-color: #FFD700; color: black; font-weight: bold; border-radius: 8px;
+        border: none; padding: 10px 24px; transition: all 0.3s;
+    }
+    .stButton>button:hover { background-color: #FFEA00; box-shadow: 0px 0px 10px #FFD700; color: black; }
+    
+    /* Footer */
+    .footer {
+        position: fixed; bottom: 0; left: 0; width: 100%;
+        background-color: #111; color: #666; text-align: center;
+        padding: 10px; font-size: 12px; border-top: 1px solid #333;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("💎 TARA INSTITUTIONAL SCANNER")
-st.markdown("### The 'Pathology Lab' for NSE Cash (2,200+ Stocks)")
+# --- 2. HEADER SECTION ---
+col1, col2 = st.columns([1, 4])
 
-# --- 2. DATA ENGINE (Robust) ---
+with col1:
+    # Display Logo if it exists, otherwise show text
+    if os.path.exists("TARA-LOGO.jpeg"):
+        st.image("TARA-LOGO.jpeg", width=120)
+    else:
+        st.warning("Upload TARA-LOGO.jpeg to GitHub")
+
+with col2:
+    st.title("INTRADAY to SWING CARRY SCANNER")
+    st.caption("Powered by TARA Proprietary Logic | Institutional Swing Grade")
+
+st.divider()
+
+# --- 3. DATA ENGINE (Robust) ---
 @st.cache_data(ttl=3600)
 def get_nse_tickers():
     try:
         url = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=10)
         
-        # Read and Clean CSV
         df = pd.read_csv(io.StringIO(response.content.decode('utf-8')))
-        df.columns = df.columns.str.strip() # FIX: Remove hidden spaces
+        df.columns = df.columns.str.strip() # Fix hidden spaces
         
-        # Filter for Equity Series (EQ)
         if 'SERIES' in df.columns:
             df = df[df['SERIES'] == 'EQ']
             
         tickers = [f"{symbol}.NS" for symbol in df['SYMBOL'].tolist()]
         return tickers
-        
     except Exception as e:
-        st.error(f"⚠️ Network Error fetching NSE List: {e}. Using backup.")
+        st.error(f"⚠️ Network Error fetching NSE List. Using Backup.")
         return ["RELIANCE.NS", "HDFCBANK.NS", "INFY.NS", "ITC.NS", "TCS.NS", "SBIN.NS"]
 
-# --- 3. THE TARA LOGIC ---
+# --- 4. TARA LOGIC (Renamed & Styled) ---
 def analyze_stock(ticker):
     try:
         # Download Data (Small history to prevent timeouts)
-        # Using threads=False inside yf to prevent conflicts with our outer executor
         df = yf.download(ticker, period="6mo", interval="1d", progress=False, threads=False)
         
-        # CHECK 1: DATA EXISTENCE
-        if df.empty or len(df) < 20: 
-            return {"Ticker": ticker, "Reason": "No Data/Too New"}
+        if df.empty or len(df) < 50: return None
         
-        # Handle Multi-level columns in new yfinance versions
-        try:
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-        except:
-            pass
+        # FIX: Handle MultiIndex columns in new yfinance
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
 
-        # CHECK 2: LIQUIDITY (Skip Penny/Dead Stocks)
-        # Turnover > 50 Lakhs OR Price > 20
+        # LIQUIDITY FILTER (Lowered to 10L for safety)
         avg_vol = df['Volume'].iloc[-5:].mean()
         price = float(df['Close'].iloc[-1])
-        
-        if (avg_vol * price) < 2500000: # Lowered to 25L for broader scan
-            return {"Ticker": ticker, "Reason": "Illiquid"}
+        if (avg_vol * price) < 1000000: return None
 
         # --- CALCULATIONS ---
         
-        # A. VWAP (Yearly Approx)
+        # A. TARA MAGNET (Yearly VWAP)
         current_year = df.index[-1].year
         df_y = df[df.index.year == current_year].copy()
+        
         if df_y.empty: 
-             # Fallback to 200 SMA if Jan 1st just passed
-             current_yvwap = df['Close'].rolling(50).mean().iloc[-1]
+             tara_magnet = df['Close'].rolling(50).mean().iloc[-1]
         else:
-             yvwap = (df_y['Close'] * df_y['Volume']).cumsum() / df_y['Volume'].cumsum()
-             current_yvwap = yvwap.iloc[-1]
+             tara_magnet = (df_y['Close'] * df_y['Volume']).cumsum() / df_y['Volume'].cumsum()
+             tara_magnet = tara_magnet.iloc[-1]
 
-        # B. TARA Formulas
-        # Consistency: Green Candles in last 20
+        # B. TARA FORMULAS
+        # Consistency
         green_candles = (df['Close'] > df['Open']).astype(int).tail(20).sum()
         consistency = (green_candles / 20) * 100
         
-        # Efficiency: Net Move / Total Path
+        # Efficiency (Star Rating)
         lookback = 20
         net = abs(df['Close'].iloc[-1] - df['Close'].iloc[-lookback])
         path = abs(df['Close'].diff()).tail(lookback).sum()
-        efficiency = net / path if path != 0 else 0
+        efficiency_score = net / path if path != 0 else 0
         
+        # Convert Efficiency to Stars
+        if efficiency_score > 0.30: stars = "⭐⭐⭐ (High)"
+        elif efficiency_score > 0.15: stars = "⭐⭐ (Med)"
+        else: stars = "⭐ (Low)"
+
         # C. STATUS ASSIGNMENT
         status = "NEUTRAL"
         
-        # 1. DIAMOND (Strict Smart Money)
-        if price > current_yvwap and consistency >= 60 and efficiency >= 0.30:
-            status = "💎 INSTITUTIONAL BUY"
+        # Logic: Price > Magnet AND Consistency > 50%
+        if price > tara_magnet and consistency >= 60 and efficiency_score >= 0.25:
+            status = "💎 APT ENTRY (Diamond)"
+        elif price > tara_magnet and consistency >= 50:
+            status = "📝 WATCHLIST (Gold)"
             
-        # 2. GOLD (Developing)
-        elif price > current_yvwap and consistency >= 50:
-            status = "📝 WATCHLIST"
-            
-        # 3. BLUE (Broad Trend - Good for testing)
-        elif price > current_yvwap:
-            status = "🔵 TRENDING (Test)"
-
-        if status == "NEUTRAL": 
-            return {"Ticker": ticker, "Reason": "Failed Criteria"}
+        if status == "NEUTRAL": return None
 
         return {
             "Symbol": ticker.replace(".NS", ""),
             "Price": round(price, 2),
             "Status": status,
             "Consistency": f"{int(consistency)}%",
-            "Efficiency": round(efficiency, 2),
-            "YVWAP": round(current_yvwap, 2)
+            "Efficiency": stars,
+            "TARA Magnet": round(tara_magnet, 2),
+            "Magnet Dist": f"{round(((price - tara_magnet)/tara_magnet)*100, 2)}%"
         }
 
-    except Exception as e:
-        return {"Ticker": ticker, "Reason": f"Error: {str(e)}"}
+    except:
+        return None
 
-# --- 4. SCANNER ENGINE ---
+# --- 5. SCANNER ENGINE ---
 def run_scan(ticker_list, max_threads):
     results = []
-    skipped_log = [] # To store why stocks failed
-    
     bar = st.progress(0)
     status_text = st.empty()
-    
     total = len(ticker_list)
     
-    # SAFETY: Use fewer threads to avoid Yahoo Ban
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
         future_to_ticker = {executor.submit(analyze_stock, t): t for t in ticker_list}
         completed = 0
         
         for future in concurrent.futures.as_completed(future_to_ticker):
             res = future.result()
-            
-            # If valid result dictionary
-            if "Status" in res:
-                results.append(res)
-            else:
-                skipped_log.append(res) # Store failure reason
-                
+            if res: results.append(res)
             completed += 1
-            if completed % 10 == 0:
+            if completed % 5 == 0:
                 bar.progress(completed / total)
-                status_text.text(f"Scanning... {completed}/{total} stocks analyzed")
+                status_text.text(f"Scanning... {completed}/{total}")
                 
     bar.empty()
     status_text.empty()
-    return results, skipped_log
+    return pd.DataFrame(results)
 
-# --- 5. USER INTERFACE ---
+# --- 6. USER INTERFACE ---
 with st.sidebar:
     st.header("⚙️ Scanner Settings")
-    universe = st.radio("Universe:", ["Nifty 50 (Fast)", "Nifty 500 (Medium)", "Full NSE Cash (Slow)"])
-    
-    # DEBUG MODE
-    show_all_trends = st.checkbox("Show 'Trending' (Test Mode)", value=True, help="Shows all stocks above VWAP, even if they fail Consistency check. Useful to verify data is loading.")
-    
-    # SAFETY THROTTLE
-    speed_mode = st.selectbox("Scan Speed:", ["Safe (8 Threads)", "Fast (20 Threads)", "Turbo (50 Threads - Risk Ban)"], index=0)
-    
-    if speed_mode == "Safe (8 Threads)": threads = 8
-    elif speed_mode == "Fast (20 Threads)": threads = 20
-    else: threads = 50
+    universe = st.radio("Select Universe:", ["Nifty 50 (Demo)", "Nifty 500", "Full NSE Cash"])
+    speed = st.selectbox("Scan Speed:", ["Safe Mode (8 Threads)", "Turbo Mode (20 Threads)"])
+    threads = 8 if "Safe" in speed else 20
 
-# LOAD DATA
+# Fetch Data
 all_tickers = get_nse_tickers()
-
-if universe == "Nifty 50 (Fast)": targets = all_tickers[:50]
-elif universe == "Nifty 500 (Medium)": targets = all_tickers[:500]
+if universe == "Nifty 50 (Demo)": targets = all_tickers[:50]
+elif universe == "Nifty 500": targets = all_tickers[:500]
 else: targets = all_tickers
 
-st.info(f"Targeting {len(targets)} Stocks. Speed: {speed_mode}")
+st.info(f"Targeting {len(targets)} Stocks. Speed: {speed}")
 
-if st.button("🚀 START SCAN", type="primary"):
+if st.button("🚀 START TARA SCAN", type="primary"):
     with st.spinner("Analyzing Market Structure..."):
-        valid_data, logs = run_scan(targets, threads)
+        df = run_scan(targets, threads)
     
-    if valid_data:
-        df = pd.DataFrame(valid_data)
-        
-        # 1. DIAMOND
-        st.subheader("💎 DIAMOND SETUPS (High Precision)")
-        diamonds = df[df['Status'] == "💎 INSTITUTIONAL BUY"]
+    if not df.empty:
+        # DISPLAY DIAMONDS
+        diamonds = df[df['Status'].str.contains("Diamond")]
         if not diamonds.empty:
-            st.dataframe(diamonds.style.applymap(lambda x: 'color: #00FF00', subset=['Status']), use_container_width=True)
+            st.subheader(f"💎 DIAMOND SETUPS ({len(diamonds)})")
+            st.dataframe(
+                diamonds.style.applymap(lambda x: 'color: #00FF00; font-weight: bold', subset=['Status']),
+                use_container_width=True, hide_index=True
+            )
         else:
-            st.info("No Diamond setups found. Market conditions may be weak.")
-
-        # 2. WATCHLIST
-        st.subheader("📝 WATCHLIST (Developing)")
-        watch = df[df['Status'] == "📝 WATCHLIST"]
-        if not watch.empty:
-            st.dataframe(watch.style.applymap(lambda x: 'color: #FFD700', subset=['Status']), use_container_width=True)
-        else:
-            st.info("No Watchlist setups found.")
+            st.warning("No Diamond Setups found.")
             
-        # 3. TRENDING (Test Mode)
-        if show_all_trends:
-            st.subheader("🔵 ALL TRENDING (Debug View)")
-            st.caption("Stocks simply trading above Yearly VWAP (No filter). If this is empty, Yahoo Finance is blocked.")
-            trending = df[df['Status'] == "🔵 TRENDING (Test)"]
-            if not trending.empty:
-                st.dataframe(trending, use_container_width=True)
-            else:
-                st.error("No Data Found. Yahoo Finance might be blocking this IP.")
-                
-        # 4. DEBUG LOGS (Expandable)
-        with st.expander("System Logs (Why were stocks skipped?)"):
-            st.write(f"Total Scanned: {len(targets)}")
-            st.write(f"Valid Results: {len(valid_data)}")
-            if logs:
-                st.dataframe(pd.DataFrame(logs).head(100)) # Show first 100 failures
-                
+        # DISPLAY WATCHLIST
+        gold = df[df['Status'].str.contains("Gold")]
+        if not gold.empty:
+            st.subheader(f"📝 WATCHLIST ({len(gold)})")
+            st.dataframe(
+                gold.style.applymap(lambda x: 'color: #FFD700;', subset=['Status']),
+                use_container_width=True, hide_index=True
+            )
     else:
-        st.error("Scan returned 0 results. Check System Logs below.")
-        with st.expander("System Logs"):
-            st.dataframe(pd.DataFrame(logs))
+        st.error("No stocks met the criteria. Check if Yahoo Finance is blocking connection.")
+
+# --- 7. FOOTER (SEBI DISCLAIMER) ---
+st.markdown("""
+    <div class="footer">
+    <strong>DISCLAIMER (SEBI COMPLIANCE):</strong><br>
+    The information provided by the 'TARA Swing Scanner' is for <strong>EDUCATIONAL PURPOSES ONLY</strong>. 
+    It relies on historical data and algorithmic formulas (VWAP, Consistency) to identify patterns. 
+    It does NOT constitute financial advice, investment recommendations, or a tip service. 
+    Trading in the stock market involves significant risk. Please consult a SEBI registered investment advisor before making any financial decisions. 
+    We are not responsible for any profits or losses incurred based on this data.
+    </div>
+    """, unsafe_allow_html=True)
