@@ -45,7 +45,7 @@ st.markdown("""
 col1, col2 = st.columns([1, 4])
 
 with col1:
-    # Display Logo if it exists, otherwise show text
+    # Display Logo if it exists
     if os.path.exists("TARA-LOGO.jpeg"):
         st.image("TARA-LOGO.jpeg", width=120)
     else:
@@ -57,7 +57,7 @@ with col2:
 
 st.divider()
 
-# --- 3. DATA ENGINE (Robust) ---
+# --- 3. DATA ENGINE ---
 @st.cache_data(ttl=3600)
 def get_nse_tickers():
     try:
@@ -77,19 +77,19 @@ def get_nse_tickers():
         st.error(f"⚠️ Network Error fetching NSE List. Using Backup.")
         return ["RELIANCE.NS", "HDFCBANK.NS", "INFY.NS", "ITC.NS", "TCS.NS", "SBIN.NS"]
 
-# --- 4. TARA LOGIC (Renamed & Styled) ---
+# --- 4. TARA LOGIC ---
 def analyze_stock(ticker):
     try:
-        # Download Data (Small history to prevent timeouts)
+        # Download Data
         df = yf.download(ticker, period="6mo", interval="1d", progress=False, threads=False)
         
         if df.empty or len(df) < 50: return None
         
-        # FIX: Handle MultiIndex columns in new yfinance
+        # FIX: Handle MultiIndex columns
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
-        # LIQUIDITY FILTER (Lowered to 10L for safety)
+        # LIQUIDITY FILTER (10L Safety)
         avg_vol = df['Volume'].iloc[-5:].mean()
         price = float(df['Close'].iloc[-1])
         if (avg_vol * price) < 1000000: return None
@@ -135,12 +135,12 @@ def analyze_stock(ticker):
 
         return {
             "Symbol": ticker.replace(".NS", ""),
-            "Price": round(price, 2),
+            "Price": f"{price:.2f}",  # FORCE 2 DECIMALS (String)
             "Status": status,
             "Consistency": f"{int(consistency)}%",
             "Efficiency": stars,
-            "TARA Magnet": round(tara_magnet, 2),
-            "Magnet Dist": f"{round(((price - tara_magnet)/tara_magnet)*100, 2)}%"
+            "TARA Magnet": f"{tara_magnet:.2f}", # FORCE 2 DECIMALS (String)
+            "Magnet Dist": f"{((price - tara_magnet)/tara_magnet)*100:.2f}%" # FORCE 2 DECIMALS
         }
 
     except:
