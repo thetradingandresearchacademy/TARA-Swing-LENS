@@ -53,7 +53,7 @@ with col1:
 
 with col2:
     st.title("INTRADAY to SWING CARRY SCANNER")
-    st.caption("Powered by TARA Proprietary Logic | Institutional Swing Grade")
+    st.caption("Powered by "TARA SWINGLAB" Framework | Institutional Swing Grade")
 
 st.divider()
 
